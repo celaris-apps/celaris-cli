@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { program } from 'commander'
 import { exec, spawn } from 'child_process'
+import inquirer from 'inquirer'
+import degit from 'degit'
 import fs from 'fs-extra'
 import os from 'os'
 import path from 'path'
@@ -40,8 +42,14 @@ async function fixPackageJson() {
         let dependencies = viteObj.dependencies || {}
         let devDependencies = viteObj.devDependencies || {}
 
-        scripts.cbuild = 'cmake-js build -O ./src-celaris/build'
-        scripts.cclean = 'cmake-js clean -O ./src-celaris/build'
+        scripts.cmake = 'cmake -S . -B ./src-celaris/build'
+        scripts.cbuild = 'cmake --build ./src-celaris/build --config Release'
+        scripts.cclean = 'cmake --build ./src-celaris/build --target clean'
+        scripts.ctest = 'ctest --test-dir ./src-celaris/build --config Release'
+        scripts.cmakeall = 'npm run cmake && npm run cbuild && npm run ctest'
+
+        // scripts.cbuild = 'cmake-js build -O ./src-celaris/build'
+        // scripts.cclean = 'cmake-js clean -O ./src-celaris/build'
         scripts.dev = 'vite --port 7832'
         scripts.execute = 'start ./src-celaris/build/bin/Release/celaris.exe'
 
@@ -90,18 +98,60 @@ async function runInteractiveCommand(command, args = []) {
   })
 }
 
-// Clone, copy files, and remove temp directory
-async function cloneAndCopy(command, args = []) {
+// // Clone, copy files, and remove temp directory
+// async function gitCloneAndCopy(command, args = []) {
+//   try {
+//     console.log('Command:', command, args)
+
+//     console.log('Cloning repository...')
+//     await runInteractiveCommand(command, args)
+
+//     console.log('Copying files...')
+//     await copyFiltedFiles()
+
+//     console.log('Removing temporary directory...')
+
+//     if (command === 'npm') {
+//       fixPackageJson()
+//     }
+
+//     // Removing the temporary directory
+//     await fs.remove(tempDir)
+
+//     console.log('Repository cloned and files copied successfully.')
+//   } catch (error) {
+//     console.error('Error during operation:', error)
+//   }
+// }
+
+async function cloneAndCopy(repo, dest, fixJson = false) {
+  const emitter = degit(repo, {
+    cache: false,
+    force: true,
+    verbose: true,
+  })
+
+  emitter.on('info', (info) => {
+    console.log(info.message)
+  })
+
+  emitter.on('warn', (warning) => {
+    console.warn(warning.message)
+  })
+
+  emitter.on('error', (error) => {
+    console.error(error.message)
+  })
+
   try {
-    console.log('Cloning repository...')
-    await runInteractiveCommand(command, args)
+    await emitter.clone(dest)
 
     console.log('Copying files...')
     await copyFiltedFiles()
 
     console.log('Removing temporary directory...')
 
-    if (command === 'npm') {
+    if (fixJson) {
       fixPackageJson()
     }
 
@@ -119,22 +169,61 @@ program
   .command('init')
   .description('Initialising celaris')
   .action(async () => {
-    // Clone the C++ source repository and copy the files to the current directory
-    await cloneAndCopy('git', ['clone', repoUrl, tempDir])
-
     console.log('\n\nInitialising Vite...')
+
+    const answers = await inquirer.prompt([
+      {
+        type: 'list',
+        name: 'framework',
+        message: 'Select a framework:',
+        choices: ['Vanilla', 'Vue', 'React', 'Preact', 'Lit', 'Svelte', 'Solid', 'Qwik', 'Custom'],
+      },
+      {
+        type: 'input',
+        name: 'customFramework',
+        message: 'Enter the (public) repository of your vite template (user/repo/subdirectory*):',
+        when: (answers) => answers.framework === 'Custom',
+      },
+      {
+        type: 'list',
+        name: 'typescript',
+        message: 'Enable TypeScript:',
+        choices: ['Yes', 'No'],
+        when: (answers) => answers.framework !== 'Custom',
+      },
+      // {
+      //   type: 'list',
+      //   name: 'tailwind',
+      //   message: 'Enable Tailwind:',
+      //   choices: ['Yes', 'No'],
+      // },
+    ])
+
+    console.log('Selected framework:', answers.framework)
+
+    let template = `celaris-apps/templates/template-${answers.framework.toLowerCase()}${answers.typescript === 'Yes' ? '-ts' : ''}`
+    if (answers.framework === 'Custom') {
+      template = answers.customFramework
+    }
     /**
      * Initialise Vite in a temporary directory then copy the files to the current directory
      * This is done to avoid conflicts with the existing package.json file.
      */
-    await cloneAndCopy('npm', ['create', 'vite@latest', tempDir])
+    await cloneAndCopy(`${template}`, tempDir, true)
+
+    console.log('\n\nInitialising Celaris Source...')
+
+    // Clone the C++ source repository and copy the files to the current directory
+    await cloneAndCopy(repoUrl, tempDir)
+
+    console.log('\n\nInitialising the project...')
 
     // Install the dependencies in the current directory
     await runInteractiveCommand('npm install')
 
-    await runInteractiveCommand('npm', ['install', 'cmake-js'])
+    // await runInteractiveCommand('npm', ['install', 'cmake-js'])
     await runInteractiveCommand('npm', ['install', 'wait-on', 'concurrently', '--save-dev'])
-    await runInteractiveCommand('npm', ['run', 'cbuild'])
+    await runInteractiveCommand('npm', ['run', 'cmakeall'])
 
     console.log('Initialisation complete.')
   })
@@ -145,7 +234,7 @@ program
   .action(async () => {
     console.log('Running in development mode.')
     try {
-      await runInteractiveCommand('concurrently --kill-others "npm run dev" "wait-on http://localhost:7832 && npm run cbuild && npm run execute"')
+      await runInteractiveCommand('concurrently --kill-others "npm run dev" "wait-on http://localhost:7832 && npm run cmakeall && npm run execute"')
     } catch (error) {
       // do nothing as it will likely throw an error when the process is killed
     }

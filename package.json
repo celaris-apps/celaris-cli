@@ -15,7 +15,9 @@
   "dependencies": {
     "cmake-js": "^7.3.0",
     "commander": "^12.1.0",
-    "fs-extra": "^11.2.0"
+    "degit": "^2.8.4",
+    "fs-extra": "^11.2.0",
+    "inquirer": "^10.2.2"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
