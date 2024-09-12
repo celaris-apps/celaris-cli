@@ -1,6 +1,6 @@
 {
-  "name": "celaris",
-  "version": "0.0.1",
+  "name": "celaris-cli",
+  "version": "0.1.0",
   "description": "",
   "main": "index.js",
   "type": "module",
