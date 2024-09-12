@@ -6,6 +6,8 @@ import degit from 'degit'
 import fs from 'fs-extra'
 import os from 'os'
 import path from 'path'
+import yaml from 'js-yaml'
+import https from 'https'
 
 // Repository to clone and the branch you want to clone
 const repoUrl = 'https://github.com/celaris-apps/celaris-src.git'
@@ -14,8 +16,12 @@ const tempDir = 'celaris-src-temp'
 
 // Function to determine which files/folders to copy
 const filterFunc = (src) => {
+  console.log('Filtering:', src)
   return (
-    !src.includes(path.join(tempDir, '.git')) && !src.includes(path.join(tempDir, 'README.md')) && !src.includes(path.join(tempDir, 'package.json'))
+    !src.includes(path.join(tempDir, '.git')) &&
+    !src.includes(path.join(tempDir, 'README.md')) &&
+    !src.includes(path.join(tempDir, 'package.json')) &&
+    !src.includes(path.join(tempDir, '_gitignore'))
   )
 }
 
@@ -71,6 +77,26 @@ async function fixPackageJson() {
     }
   } catch (error) {
     console.error('Error reading package.json:', error)
+  }
+}
+
+function mergeGitIgnoreFiles() {
+  const gitIgnorePath = path.join(tempDir, '_gitignore')
+  const gitIgnoreLocalPath = path.join(process.cwd(), '.gitignore')
+
+  if (fs.existsSync(gitIgnorePath) && fs.existsSync(gitIgnoreLocalPath)) {
+    const gitIgnore = fs.readFileSync(gitIgnorePath, 'utf8')
+    const gitIgnoreLocal = fs.readFileSync(gitIgnoreLocalPath, 'utf8')
+
+    // Normalize lines by trimming whitespace and converting to lower case.
+    const gitIgnoreLines = gitIgnore.split('\n').map((line) => line.trim())
+    const gitIgnoreLocalLines = gitIgnoreLocal.split('\n').map((line) => line.trim())
+
+    // Use a Set to eliminate duplicates.
+    const mergedLines = [...new Set([...gitIgnoreLines, ...gitIgnoreLocalLines])]
+
+    // Write the merged lines back to the local .gitignore file.
+    fs.writeFileSync(gitIgnoreLocalPath, mergedLines.join('\n'))
   }
 }
 
@@ -149,6 +175,8 @@ async function cloneAndCopy(repo, dest, fixJson = false) {
     console.log('Copying files...')
     await copyFiltedFiles()
 
+    mergeGitIgnoreFiles()
+
     console.log('Removing temporary directory...')
 
     if (fixJson) {
@@ -171,12 +199,28 @@ program
   .action(async () => {
     console.log('\n\nInitialising Vite...')
 
+    //get frameworks.yaml from https://raw.githubusercontent.com/celaris-apps/templates/main/frameworks.yaml
+
+    async function readChoices() {
+      try {
+        const response = await fetch('https://raw.githubusercontent.com/celaris-apps/templates/main/frameworks.yaml')
+        const data = await response.text()
+        const frameworks = yaml.load(data)
+        return frameworks
+      } catch (e) {
+        console.log('Error:', e.stack)
+      }
+    }
+
+    const frameworks = await readChoices()
+
     const answers = await inquirer.prompt([
       {
         type: 'list',
         name: 'framework',
         message: 'Select a framework:',
-        choices: ['Vanilla', 'Vue', 'React', 'Preact', 'Lit', 'Svelte', 'Solid', 'Qwik', 'Custom'],
+        //TODO: Keep an eye on Qwik as the vite template is broken
+        choices: frameworks.supported,
       },
       {
         type: 'input',
@@ -231,10 +275,20 @@ program
 program
   .command('dev')
   .description('Run in development mode')
-  .action(async () => {
+  .option('--no-build', 'disable the build step')
+  .action(async (options) => {
     console.log('Running in development mode.')
+
+    console.log('Options:', options)
+
+    const cmd = `concurrently --kill-others "npm run dev" "wait-on http://localhost:7832 ${
+      options.build ? '&& npm run cmakeall' : ''
+    } && npm run execute"`
+
+    console.log('Command', cmd)
+
     try {
-      await runInteractiveCommand('concurrently --kill-others "npm run dev" "wait-on http://localhost:7832 && npm run cmakeall && npm run execute"')
+      await runInteractiveCommand(cmd)
     } catch (error) {
       // do nothing as it will likely throw an error when the process is killed
     }
