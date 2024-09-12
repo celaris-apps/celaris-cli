@@ -3,7 +3,7 @@
 
 ## Introduction
 
-Celaris CLI is a command-line interface tool designed to streamline the setup and development process of Celaris projects by automating tasks like project initialization, repository cloning, and dependency management.
+Celaris CLI is a command-line interface tool designed to streamline the development process of Celaris projects .
 
 ## Prerequisites
 
@@ -20,13 +20,6 @@ npm install celaris-cli
 
 ## Usage
 
-### Initialising a Project
-
-To initialise a new project, run the `init` command. This command sets up the project by cloning the necessary repositories, setting up the environment, and installing dependencies.
-
-```bash
-npm run celaris init
-```
 
 ### Development Mode
 
@@ -41,14 +34,6 @@ You can also run the dev command without running a build command (handy on first
 ```bash
 npm run celaris -- dev --no-build
 ```
-
-## Features
-
-- **Framework Selection:** Choose from a list of supported frameworks during initialization.
-- **TypeScript Support:** Option to enable TypeScript configuration.
-- **Interactive Commands:** Run commands interactively with real-time output.
-- **File Filtering:** Exclude specific files or directories during copy operations.
-- **Package.json Management:** Merge and manage package.json dependencies and scripts.
 
 ## Contributing
 
