@@ -1,7 +1,7 @@
 {
   "name": "celaris-cli",
   "version": "0.1.0",
-  "description": "",
+  "description": "A CLI tool for Celaris for easy project setup and development",
   "main": "index.js",
   "type": "module",
   "scripts": {
@@ -10,8 +10,6 @@
   "bin": {
     "celaris": "./index.js"
   },
-  "author": "",
-  "license": "ISC",
   "dependencies": {
     "cmake-js": "^7.3.0",
     "commander": "^12.1.0",
@@ -23,5 +21,20 @@
   "devDependencies": {
     "concurrently": "^8.2.2",
     "wait-on": "^8.0.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/celaris-apps/celaris-cli.git"
+  },
+  "keywords": [
+    "celaris",
+    "cli",
+    "development"
+  ],
+  "author": "Celaris",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/celaris-apps/celaris-cli/issues"
+  },
+  "homepage": "https://celaris.cc"
 }
