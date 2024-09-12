@@ -1,20 +1,26 @@
 #!/usr/bin/env node
 import { program } from 'commander'
-import { exec, spawn } from 'child_process'
+import { spawn } from 'child_process'
 import inquirer from 'inquirer'
 import degit from 'degit'
 import fs from 'fs-extra'
-import os from 'os'
 import path from 'path'
 import yaml from 'js-yaml'
-import https from 'https'
 
 // Repository to clone and the branch you want to clone
 const repoUrl = 'https://github.com/celaris-apps/celaris-src.git'
-const branch = 'main' // Change this to the branch you need
 const tempDir = 'celaris-src-temp'
 
-// Function to determine which files/folders to copy
+/**
+ * This function filters the src path to exclude specific files/directories.
+ *
+ * This function is used as a filter function in the `fs.copy` function to exclude specific files/directories
+ * from the copy operation. The function returns `true` if the src path should be included in the copy operation
+ * and `false` if the src path should be excluded.
+ *
+ * @param {string} src the source path
+ * @returns
+ */
 const filterFunc = (src) => {
   console.log('Filtering:', src)
   return (
@@ -25,7 +31,13 @@ const filterFunc = (src) => {
   )
 }
 
-// Copy operation with filter
+/**
+ * This function copies the files from the cloned repository to the current directory.
+ *
+ * This function uses the `fs.copy` function from the `fs-extra` module to copy the
+ * files from the cloned repository to the current directory. The `filter` option is
+ * used to exclude specific files/directories from the copy operation using the `filterFunc`.
+ */
 async function copyFiltedFiles() {
   try {
     await fs.copy(tempDir, '.', { filter: filterFunc, overwrite: true })
@@ -35,27 +47,38 @@ async function copyFiltedFiles() {
   }
 }
 
+/**
+ * This function fixes the package.json file
+ *
+ * This function reads the package.json file from the cloned repository and the local repository,
+ * merges the scripts, dependencies, and devDependencies, and writes the merged lines back to the local package.json file.
+ *
+ * The function also deletes the package-lock.json file if it exists. So the user can run `npm install` to install the
+ * newly merged dependencies.
+ */
 async function fixPackageJson() {
   try {
+    // Check if the package.json file exists in the cloned repository and the local repository
     if (fs.existsSync(tempDir + '/package.json') && fs.existsSync('./package.json')) {
+      // Read the package.json files from the cloned repository and the local repository
       let packageJson = fs.readFileSync('./package.json')
       let viteJson = fs.readFileSync(tempDir + '/package.json')
       if (packageJson && viteJson) {
+        // Parse the package.json files
         let packageObj = JSON.parse(packageJson)
         let viteObj = JSON.parse(viteJson)
 
+        // Extract the scripts, dependencies, and devDependencies from the vite package.json file
         let scripts = viteObj.scripts || {}
         let dependencies = viteObj.dependencies || {}
         let devDependencies = viteObj.devDependencies || {}
 
+        // Add the celaris scripts to the package.json file
         scripts.cmake = 'cmake -S . -B ./src-celaris/build'
         scripts.cbuild = 'cmake --build ./src-celaris/build --config Release'
         scripts.cclean = 'cmake --build ./src-celaris/build --target clean'
         scripts.ctest = 'ctest --test-dir ./src-celaris/build --config Release'
         scripts.cmakeall = 'npm run cmake && npm run cbuild && npm run ctest'
-
-        // scripts.cbuild = 'cmake-js build -O ./src-celaris/build'
-        // scripts.cclean = 'cmake-js clean -O ./src-celaris/build'
         scripts.dev = 'vite --port 7832'
         scripts.execute = 'start ./src-celaris/build/bin/Release/celaris.exe'
 
@@ -80,11 +103,20 @@ async function fixPackageJson() {
   }
 }
 
+/**
+ * Merge the .gitignore files from the cloned repository and the local repository.
+ *
+ * This function reads the .gitignore file from the cloned repository and the local repository,
+ * merges the lines, and writes the merged lines back to the local .gitignore file.
+ *
+ * The merged lines are normalized by trimming whitespace and duplicates are eliminated by using a Set.
+ */
 function mergeGitIgnoreFiles() {
   const gitIgnorePath = path.join(tempDir, '_gitignore')
   const gitIgnoreLocalPath = path.join(process.cwd(), '.gitignore')
 
   if (fs.existsSync(gitIgnorePath) && fs.existsSync(gitIgnoreLocalPath)) {
+    // Get both .gitignore files as strings using the same encoding (utf8).
     const gitIgnore = fs.readFileSync(gitIgnorePath, 'utf8')
     const gitIgnoreLocal = fs.readFileSync(gitIgnoreLocalPath, 'utf8')
 
@@ -100,6 +132,20 @@ function mergeGitIgnoreFiles() {
   }
 }
 
+/**
+ * This function runs a command in interactive mode.
+ *
+ * This function uses the `spawn` function from the `child_process` module to run a command in interactive mode.
+ * The `stdio: 'inherit'` option is used to set up the input, output, and error streams to the parent process.
+ * The `shell: true` option is used to run the command in a shell, which is necessary for npm scripts.
+ *
+ * The function returns a Promise that resolves when the command completes successfully with a code of 0.
+ * If the command exits with a non-zero code, the Promise is rejected with an error.
+ *
+ * @param {string} command
+ * @param {string[]} args
+ * @returns {Promise<void>}
+ */
 async function runInteractiveCommand(command, args = []) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -124,32 +170,20 @@ async function runInteractiveCommand(command, args = []) {
   })
 }
 
-// // Clone, copy files, and remove temp directory
-// async function gitCloneAndCopy(command, args = []) {
-//   try {
-//     console.log('Command:', command, args)
-
-//     console.log('Cloning repository...')
-//     await runInteractiveCommand(command, args)
-
-//     console.log('Copying files...')
-//     await copyFiltedFiles()
-
-//     console.log('Removing temporary directory...')
-
-//     if (command === 'npm') {
-//       fixPackageJson()
-//     }
-
-//     // Removing the temporary directory
-//     await fs.remove(tempDir)
-
-//     console.log('Repository cloned and files copied successfully.')
-//   } catch (error) {
-//     console.error('Error during operation:', error)
-//   }
-// }
-
+/**
+ * This function clones a repository and copies the files to the current directory.
+ *
+ * This function uses the degit library to clone a repository to a temporary directory.
+ * The repository is cloned with the cache disabled and the force option enabled.
+ * The files are then copied to the current directory using the copyFilteredFiles function.
+ * The .git directory is excluded from the copy operation.
+ *
+ * The function also listens for info, warn, and error events from the emitter.
+ *
+ * @param {string} repo The repository to clone
+ * @param {string} dest The destination directory
+ * @param {bool} fixJson Whether to fix the package.json file
+ */
 async function cloneAndCopy(repo, dest, fixJson = false) {
   const emitter = degit(repo, {
     cache: false,
@@ -157,6 +191,7 @@ async function cloneAndCopy(repo, dest, fixJson = false) {
     verbose: true,
   })
 
+  // Listen for info, warn, and error events from the emitter
   emitter.on('info', (info) => {
     console.log(info.message)
   })
@@ -170,15 +205,19 @@ async function cloneAndCopy(repo, dest, fixJson = false) {
   })
 
   try {
+    // Clone the repository to a temporary directory
     await emitter.clone(dest)
 
+    // Copy the files to the current directory
     console.log('Copying files...')
     await copyFiltedFiles()
 
+    // Merge the .gitignore files
     mergeGitIgnoreFiles()
 
     console.log('Removing temporary directory...')
 
+    // Fix the package.json file if needed
     if (fixJson) {
       fixPackageJson()
     }
@@ -192,15 +231,44 @@ async function cloneAndCopy(repo, dest, fixJson = false) {
   }
 }
 
-program.version('0.1.0').description('An example CLI for npm package')
+/* ==================== Programs ==================== */
+
+program.version('0.1.0').description('Celaris CLI tool')
+
+/**
+ * This function initialises the celaris project.
+ *
+ * # Steps
+ *
+ * ## Step 1: Fetch supported frameworks
+ * The function fetches the supported frameworks from the celaris-apps/templates repository.
+ * The user is prompted to select a framework from the supported frameworks.
+ * The user is also prompted to enable TypeScript.
+ * The user can also enter a custom framework repository.
+ *
+ * ## Step 2: Clone and copy the vite template repository
+ * The selected framework is then used to clone the vite template repository.
+ * The vite template repository is cloned to a temporary directory.
+ * The files are then copied to the current directory using the copyFilteredFiles function.
+ * After the files are copied, the temporary directory is removed.
+ *
+ * ## Step 3: Clone and copy the celaris-src repository
+ * The function then clones the celaris-src repository to a temporary directory.
+ * The files are copied to the current directory using the copyFilteredFiles function.
+ * After the files are copied, the temporary directory is removed.
+ *
+ * ## Step 4: Install dependencies and run cmakeall script
+ * The function then installs the dependencies in the current directory.
+ * The function also installs the wait-on and concurrently packages as dev dependencies.
+ * The function then runs the cmakeall script to configure, build, and test the C++ source.
+ */
 program
   .command('init')
   .description('Initialising celaris')
   .action(async () => {
     console.log('\n\nInitialising Vite...')
 
-    //get frameworks.yaml from https://raw.githubusercontent.com/celaris-apps/templates/main/frameworks.yaml
-
+    console.log('Fetching supported frameworks...')
     async function readChoices() {
       try {
         const response = await fetch('https://raw.githubusercontent.com/celaris-apps/templates/main/frameworks.yaml')
@@ -219,7 +287,6 @@ program
         type: 'list',
         name: 'framework',
         message: 'Select a framework:',
-        //TODO: Keep an eye on Qwik as the vite template is broken
         choices: frameworks.supported,
       },
       {
@@ -272,6 +339,23 @@ program
     console.log('Initialisation complete.')
   })
 
+/**
+ * This function runs the project in development mode.
+ *
+ * # Steps
+ *
+ * ## Step 1: Run the vite server
+ * The function runs the vite server in development mode.
+ * The port is set to 7832.
+ *
+ * ## Step 2: Run the cmakeall script
+ * The function runs the cmakeall script to configure, build, and test the C++ source.
+ * The function waits for the vite server to be ready before running the cmakeall script.
+ *
+ * ## Step 3: Run the execute script
+ * The function runs the execute script to start the C++ application.
+ *
+ */
 program
   .command('dev')
   .description('Run in development mode')
@@ -294,11 +378,11 @@ program
     }
   })
 
-program
-  .command('build')
-  .description('Build the project')
-  .action(() => {
-    console.log('Building the project.')
-  })
+// program
+//   .command('build')
+//   .description('Build the project')
+//   .action(() => {
+//     console.log('Building the project.')
+//   })
 
 program.parse(process.argv)
