@@ -17,6 +17,7 @@ program
   .command('dev')
   .description('Run in development mode')
   .option('--no-build', 'disable the build step')
+  .option('--no-tests', 'run the tests')
   .action(async (options) => {
     runDev(options)
   })

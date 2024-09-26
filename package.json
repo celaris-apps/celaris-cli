@@ -1,6 +1,6 @@
 {
   "name": "celaris-cli",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "A CLI tool for Celaris for easy project setup and development",
   "main": "index.js",
   "type": "module",
@@ -11,6 +11,7 @@
     "celaris": "./index.js"
   },
   "dependencies": {
+    "chokidar": "^4.0.1",
     "cmake-js": "^7.3.0",
     "commander": "^12.1.0",
     "degit": "^2.8.4",
@@ -20,7 +21,7 @@
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
-    "wait-on": "^8.0.0"
+    "wait-on": "^8.0.1"
   },
   "repository": {
     "type": "git",

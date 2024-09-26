@@ -1,76 +1,162 @@
 import { spawn } from 'child_process'
+import chokidar from 'chokidar'
+import waitOn from 'wait-on'
+import path from 'path'
+import { resolve } from 'path'
+import os from 'os'
 
-/**
- * This function runs a command in interactive mode.
- *
- * This function uses the `spawn` function from the `child_process` module to run a command in interactive mode.
- * The `stdio: 'inherit'` option is used to set up the input, output, and error streams to the parent process.
- * The `shell: true` option is used to run the command in a shell, which is necessary for npm scripts.
- *
- * The function returns a Promise that resolves when the command completes successfully with a code of 0.
- * If the command exits with a non-zero code, the Promise is rejected with an error.
- *
- * @param {string} command
- * @param {string[]} args
- * @returns {Promise<void>}
- */
-async function runInteractiveCommand(command, args = []) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      stdio: 'inherit', // This option sets up the input, output, and error streams to the parent process
-      shell: true, // This allows the command to be run in a shell, which is necessary for npm scripts
-    })
+let viteProcess = null
+let watcher = null
+let cppProcess = null
+let options = null
+let buildCommands = []
+let buildTimeout = null
+let firstRun = true
 
-    child.on('exit', (code) => {
-      if (code !== 0) {
-        console.error(`Command exited with code ${code}`)
-        reject(new Error(`Command exited with code ${code}`))
-      } else {
-        console.log(`Command completed successfully with code ${code}`)
-        resolve()
-      }
+// Execute build commands sequentially
+const runBuildCommands = async () => {
+  for (const command of buildCommands) {
+    console.log(`Running command: ${command.cmd} ${command.args.join(' ')}`)
+    await new Promise((resolve, reject) => {
+      const proc = spawn(command.cmd, command.args, { stdio: 'inherit', shell: true })
+      proc.on('close', (code) => {
+        if (code !== 0) {
+          reject(new Error(`${command.cmd} exited with code ${code}`))
+        } else {
+          resolve()
+        }
+      })
     })
-
-    child.on('error', (error) => {
-      console.error('Failed to start subprocess.', error)
-      reject(error)
-    })
-  })
+  }
 }
 
-/*==================== EXPORTS ====================*/
+/**
+ * This function builds and starts the C++ application.
+ * It first kills the existing C++ process if running.
+ * Then it builds the C++ application using CMake and starts the application.
+ * If the `--no-build` option is passed, it skips the build step.
+ * If the `--no-tests` option is passed, it skips running the tests.
+ * If the build fails, it logs the error.
+ *
+ * The function also sets up a watcher to watch for changes in the src-celaris directory.
+ */
+const buildAndStartCpp = async () => {
+  console.log('Building and starting C++ application...')
+  // Kill existing C++ process if running
+  if (cppProcess) {
+    cppProcess.kill()
+  }
+
+  buildCommands = []
+
+  if (!firstRun || options.build !== false) {
+    buildCommands.push(
+      { cmd: 'cmake', args: ['-S', '.', '-B', './src-celaris/build'] },
+      { cmd: 'cmake', args: ['--build', './src-celaris/build', '--config', 'Debug'] }
+    )
+
+    if (options.tests !== false) {
+      buildCommands.push({ cmd: 'ctest', args: ['--test-dir', './src-celaris/build', '-C', 'Debug'] })
+    }
+  }
+  // Set firstRun to false after the first run so that 'no-build' options
+  // are ignored when a file is changed
+  firstRun = false
+
+  await runBuildCommands()
+    .then(() => {
+      console.log('C++ application built successfully.')
+      console.log('Starting C++ application...')
+
+      //Build path to executable based on platform
+      let pathParts = ['.', 'src-celaris', 'build', 'bin']
+      if (os.platform() === 'win32') {
+        pathParts.push('Debug', 'celaris.exe')
+      } else {
+        pathParts.push('celaris')
+      }
+
+      const executablePath = path.join(...pathParts)
+      console.log('Executable path:', executablePath)
+
+      cppProcess = spawn(executablePath, [], {
+        detached: true,
+        stdio: 'ignore',
+      })
+
+      cppProcess.unref()
+    })
+    .catch((error) => {
+      console.error('Build failed:', error)
+    })
+  console.log('Build and start done')
+}
 
 /**
- * This function runs the project in development mode.
- *
- * # Steps
- *
- * ## Step 1: Run the vite server
- * The function runs the vite server in development mode.
- * The port is set to 7832.
- *
- * ## Step 2: Run the cmakeall script
- * The function runs the cmakeall script to configure, build, and test the C++ source.
- * The function waits for the vite server to be ready before running the cmakeall script.
- *
- * ## Step 3: Run the execute script
- * The function runs the execute script to start the C++ application.
- *
+ * This function is called when the user exits the program.
+ * It kills the C++ and Vite processes and closes the watcher.
  */
-export async function runDev(options) {
-  console.log('Running in development mode.')
-
-  console.log('Options:', options)
-
-  const cmd = `concurrently --kill-others "npm run dev" "wait-on http://localhost:7832 ${
-    options.build ? '&& npm run cmakeall' : ''
-  } && npm run execute"`
-
-  console.log('Command', cmd)
-
-  try {
-    await runInteractiveCommand(cmd)
-  } catch (error) {
-    // do nothing as it will likely throw an error when the process is killed
+const cleanUp = () => {
+  if (cppProcess) {
+    cppProcess.kill()
   }
+  viteProcess.kill()
+  watcher.close()
+  process.exit()
+}
+
+/**
+ * This function is called when the `dev` command is run.
+ *
+ * It goes through the following steps:
+ * 1. Start the Vite development server
+ * 2. Build and start the C++ application
+ * 3. Watch for changes in the src-celaris directory
+ * 4. Clean up processes when the user exits
+ *
+ * @param {*} opts Options passed from the CLI
+ */
+export async function runDev(opts) {
+  options = opts
+  console.log('Running in development mode.')
+  console.log('Options:', options)
+  console.log('Starting Vite server...')
+
+  // Start the Vite development server
+  viteProcess = spawn('npm', ['run', 'dev'], { stdio: 'inherit', shell: true })
+
+  console.log('Waiting for Vite server to be ready...')
+  // Wait for Vite server to be ready
+  await waitOn({ resources: ['http://localhost:7832'], timeout: 30000 })
+
+  console.log('Vite server is ready.')
+
+  // Initial build and start
+  await buildAndStartCpp()
+
+  // Watch for changes in src-celaris directory
+  const srcCelarisPath = resolve(process.cwd(), './src-celaris')
+  const buildPath = [resolve(srcCelarisPath, 'build'), resolve(srcCelarisPath, 'test')]
+
+  console.log(`Watching: ${srcCelarisPath}`)
+  console.log(`Ignoring: ${buildPath}`)
+
+  // Watch for changes in src-celaris (excluding build directory)
+  watcher = chokidar.watch(srcCelarisPath, { ignored: buildPath, persistent: true })
+
+  watcher
+    // .on('add', (filePath) => console.log(`File added: ${filePath}`))
+    .on('change', async (filePath) => {
+      console.log(`File changed: ${path}`)
+      if (buildTimeout) clearTimeout(buildTimeout)
+      buildTimeout = setTimeout(() => {
+        buildAndStartCpp()
+      }, 500) // Wait 500ms after the last change
+    })
+    // .on('unlink', (filePath) => console.log(`File removed: ${filePath}`))
+    .on('ready', () => console.log(`Initial scan complete. Watching for changes in ${srcCelarisPath} while ignoring ${buildPath}.`))
+    .on('error', (error) => console.error(`Watcher error: ${error}`))
+
+  process.on('SIGINT', cleanUp)
+  process.on('SIGTERM', cleanUp)
 }
